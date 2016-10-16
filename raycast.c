@@ -297,6 +297,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
         current_item++;
         if(current_item>127){
           fprintf(stderr, "Error: Too many objects in JSON. Program can only handle 128 objects.\n");
+          fclose(json);
           exit(1);
         }
         objects[current_item] = malloc(sizeof(Object));
@@ -307,6 +308,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
         current_item++;
         if(current_item>127){
           fprintf(stderr, "Error: Too many objects in JSON. Program can only handle 128 objects.\n");
+          fclose(json);
           exit(1);
         }
         objects[current_item] = malloc(sizeof(Object));
@@ -317,6 +319,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
         current_light++;
         if(current_light>127){
           fprintf(stderr, "Error: Too many lights in JSON. Program can only handle 128 objects.\n");
+          fclose(json);
           exit(1);
         }
         lights[current_light] = malloc(sizeof(light));
@@ -325,6 +328,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
       } 
       else { 
         fprintf(stderr, "Error: Unknown type, \"%s\", on line number %d.\n", value, line);
+        fclose(json);
         exit(1);
       }
       skip_ws(json);
@@ -349,6 +353,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Current object type has width value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -358,6 +363,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Current object type has height value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -367,6 +373,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Non-light type has radial-a2 value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -376,6 +383,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Non-light type has radial-a1 value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -385,6 +393,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Non-light type has radial-a0 value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -395,6 +404,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             else{
               fprintf(stderr, "Error: Non-light type has angular-a0
                value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -404,6 +414,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Current object type cannot have radius value! Detected on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }     
@@ -418,6 +429,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Non-object type has color value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -432,6 +444,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Non-object type has color value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -446,6 +459,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Non-light type has color value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           } 
@@ -464,6 +478,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Camera type has position value on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           } 
@@ -476,6 +491,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Only planes have normal values on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           }
@@ -488,12 +504,15 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Only planes have normal values on line number %d.\n", line);
+              fclose(json);
               exit(1);
             }
           } 
           else{
             fprintf(stderr, "Error: Unknown property, \"%s\", on line %d.\n",
                 key, line);
+            fclose(json);
+            exit(1);
             //char* value = next_string(json);
           }
 
@@ -501,6 +520,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
         } 
         else {
           fprintf(stderr, "Error: Unexpected value on line %d\n", line);
+          fclose(json);
           exit(1);
         }
       }
@@ -519,6 +539,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
       } 
       else {
         fprintf(stderr, "Error: Expecting ',' or ']' on line %d.\n", line);
+        fclose(json);
         exit(1);
       }
     }
