@@ -39,11 +39,12 @@ typedef struct Camera{
 typedef struct Light{
   double color[3];
   double position[3];
-  double directions[3];
-  double radial-a0;
-  double radial-a1;
-  double radial-a2;
-  double angular-a0;
+  double direction[3];
+  double radial_a0;
+  double radial_a1;
+  double radial_a2;
+  double theta;
+  double angular_a0;
 } Light;
 
 
@@ -75,9 +76,27 @@ double sphere_intersection(double* Ro, double* Rd, double* C, double r);
 
 double plane_intersection(double* Ro, double* Rd, double* P, double* N);
 
-void generate_scene(Camera* camera, Object** objects, Pixel* buffer, int width, int height);
+void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buffer, int width, int height);
 
 void write_p3(Pixel *buffer, FILE *output_file, int width, int height, int max_color);
+
+double dot_product(double *v1, double *v2);
+
+double vector_length(double *vector);
+
+void get_reflection(double *N, double *L, double *result);
+
+double calculate_diffuse(double object_diff_color, double light_color, double *N, double *L);
+
+double frad(Light * light, double t);
+
+double clamp(double value);
+
+double dot_product(double *v1, double *v2);
+
+void subtract_vectors(double *v1, double *v2, double *result);
+
+void scalar_multiply_vector(double *vector, double scalar);
 
 //Global variable for tracking during reading of JSON file, to report errors.
 int line = 1;
@@ -127,7 +146,7 @@ int main(int argc, char *argv[]) {
   #ifdef DEBUG
     printf("Generating scene...\n");
   #endif
-  generate_scene(camera, objects, buffer, width, height);
+  generate_scene(camera, objects, lights, buffer, width, height);
   #ifdef DEBUG
     printf("Opening output file...\n");
   #endif
@@ -158,6 +177,7 @@ int next_c(FILE* json) {
   }
   if (c == EOF) {
     fprintf(stderr, "Error: Unexpected end of file on line number %d.\n", line);
+    fclose(json);
     exit(1);
   }
   return c;
@@ -170,6 +190,7 @@ void expect_c(FILE* json, int d) {
   int c = next_c(json);
   if (c == d) return;
   fprintf(stderr, "Error: Expected '%c' on line %d.\n", d, line);
+  fclose(json);
   exit(1);    
 }
 
@@ -190,6 +211,7 @@ char* next_string(FILE* json) {
   int c = next_c(json);
   if (c != '"') {
     fprintf(stderr, "Error: Expected string on line %d.\n", line);
+    fclose(json);
     exit(1);
   }  
   c = next_c(json);
@@ -197,14 +219,17 @@ char* next_string(FILE* json) {
   while (c != '"') {
     if (i >= 128) {
       fprintf(stderr, "Error: Strings longer than 128 characters in length are not supported.\n");
+      fclose(json);
       exit(1);      
     }
     if (c == '\\') {
       fprintf(stderr, "Error: Strings with escape codes are not supported.\n");
+      fclose(json);
       exit(1);      
     }
     if (c < 32 || c > 126) {
       fprintf(stderr, "Error: Strings may contain only ascii characters.\n");
+      fclose(json);
       exit(1);
     }
     buffer[i] = c;
@@ -220,6 +245,7 @@ double next_number(FILE* json) {
   int count = fscanf(json, "%lf", &value);
   if (count != 1){
     fprintf(stderr, "Error: Failed to read number on line %d.\n", line);
+    fclose(json);
     exit(1);
   }
   return value;
@@ -245,7 +271,7 @@ double* next_vector(FILE* json) {
 
 void read_scene(char* filename, Camera* camera, Object** objects, Light** lights) {
   int c;
-  inr current_light = -1;
+  int current_light = -1;
   int current_item = -1; //for tracking the current object in the Object array
   int current_type; //for tracking the current object we are reading from the json list
   FILE* json = fopen(filename, "r");
@@ -322,8 +348,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           fclose(json);
           exit(1);
         }
-        lights[current_light] = malloc(sizeof(light));
-        lights[current_light]->type = 0;
+        lights[current_light] = malloc(sizeof(Light));
         current_type = 3;
       } 
       else { 
@@ -331,6 +356,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
         fclose(json);
         exit(1);
       }
+      printf("Type: %d\n", current_type);
       skip_ws(json);
 
       while (1) {
@@ -369,7 +395,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           }
           else if (strcmp(key, "radial-a2") == 0){
             if(current_type == 3){
-              lights[current_light]->radial-a2 = next_number(json);
+              lights[current_light]->radial_a2 = next_number(json);
             }
             else{
               fprintf(stderr, "Error: Non-light type has radial-a2 value on line number %d.\n", line);
@@ -379,7 +405,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           }
           else if (strcmp(key, "radial-a1") == 0){
             if(current_type == 3){
-              lights[current_light]->radial-a1 = next_number(json);
+              lights[current_light]->radial_a1 = next_number(json);
             }
             else{
               fprintf(stderr, "Error: Non-light type has radial-a1 value on line number %d.\n", line);
@@ -389,7 +415,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           }
           else if (strcmp(key, "radial-a0") == 0){
             if(current_type == 3){
-              lights[current_light]->radial-a0 = next_number(json);
+              lights[current_light]->radial_a0 = next_number(json);
             }
             else{
               fprintf(stderr, "Error: Non-light type has radial-a0 value on line number %d.\n", line);
@@ -399,11 +425,10 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           }
           else if (strcmp(key, "angular-a0") == 0){
             if(current_type == 3){
-              lights[current_light]->angular-a0 = next_number(json);
+              lights[current_light]->angular_a0 = next_number(json);
             }
             else{
-              fprintf(stderr, "Error: Non-light type has angular-a0
-               value on line number %d.\n", line);
+              fprintf(stderr, "Error: Non-light type has angular-a0 value on line number %d.\n", line);
               fclose(json);
               exit(1);
             }
@@ -470,7 +495,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
               objects[current_item]->position[1] = (*vector++);
               objects[current_item]->position[2] = (*vector++);  
             }
-            if(current_type == 3){  //only spheres and planes have position
+            else if(current_type == 3){  //only spheres and planes have position
               double* vector = next_vector(json);
               lights[current_light]->position[0] = (*vector++);
               lights[current_light]->position[1] = (*vector++);
@@ -504,6 +529,16 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
             }
             else{
               fprintf(stderr, "Error: Only planes have normal values on line number %d.\n", line);
+              fclose(json);
+              exit(1);
+            }
+          }
+          else if(strcmp(key, "theta") == 0){
+            if(current_type == 3){  //only spheres have radius
+              lights[current_light]->theta = next_number(json);
+            }
+            else{
+              fprintf(stderr, "Error: Current object type cannot have theta value! Detected on line number %d.\n", line);
               fclose(json);
               exit(1);
             }
@@ -546,9 +581,7 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
   }
 }
 
-double sqr(double v) {
-  return v*v;
-}
+double sqr(double v) {return v*v;}
 
 void normalize(double* v) {
   double len = sqrt(sqr(v[0]) + sqr(v[1]) + sqr(v[2]));
@@ -662,12 +695,16 @@ double plane_intersection(double* Ro, double* Rd, double* P, double* N) {
   return -1;
 }
 
-void generate_scene(Camera* camera, Object** objects, Pixel* buffer, int width, int height){
+void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buffer, int width, int height){
   //write these objects to a ppm image
   double camera_width = camera->width;
   double camera_height = camera->height;
   double pixheight = camera_height / height;
   double pixwidth = camera_width / width;
+  double Ron[3];
+  double Rdn[3];
+  Object *closest_shadow_object;
+
   for (int y = 0; y < height; y += 1) {
     for (int x = 0; x < width; x += 1) {
       double Ro[3] = {0, 0, 0};
@@ -679,7 +716,8 @@ void generate_scene(Camera* camera, Object** objects, Pixel* buffer, int width, 
       };
       normalize(Rd);
 
-      double best_t = INFINITY;
+      double closest_t = INFINITY;
+      Object * closest_object = NULL;
       for (int i=0; objects[i] != 0; i += 1) {
         double t = 0;
 
@@ -691,72 +729,104 @@ void generate_scene(Camera* camera, Object** objects, Pixel* buffer, int width, 
           t = plane_intersection(Ro, Rd, objects[i]->position, objects[i]->plane.normal);
           break;
         default:
-          // Horrible error
+          printf("Error: Unknown object type. Element: %d\n", i);	
           exit(1);
         }
-        /*
-        // We have the closest object..
-
-    double* color = malloc(sizeof(double)*3);
-    color[0] = 0; // ambient_color[0];
-    color[1] = 0; // ambient_color[1];
-    color[2] = 0; // ambient_color[2];
-
-    for (int j=0; light[j] != NULL; j+=1) {
-      // Shadow test
-      Ron = closest_t * Rd + Ro;
-      Rdn = light_position - Ron;
-      closest_shadow_object = ...;
-      for (int k=0; object[k] != NULL; k+=1) {
-	if (object[k] == closest_object) continue;
-	// 
-	switch(...) {
-	case SPHERE:
-	  t = sphere_intersect(..);
-	  break;
-	case PLANE:
-	  t = plane_intersect(..);
-	  break;
-	default:
-	  // ERROR
-	  break;
-	}
-	if (best_t > distance_to_light) {
-	  continue;
-	}
-      }
-      if (closest_shadow_object == NULL) {
-	// N, L, R, V
-	N = closest_object->normal; // plane
-	N = Ron - closest_object->center; // sphere
-	L = Rdn; // light_position - Ron;
-	R = reflection of L;
-	V = Rd;
-	diffuse = ...; // uses object's diffuse color
-	specular = ...; // uses object's specular color
-	color[0] += frad() * fang() * (diffuse + specular);
-	color[1] += frad() * fang() * (diffuse + specular);
-	color[2] += frad() * fang() * (diffuse + specular);
-      }
-    }
-    // The color has now been calculated
-
-    buffer[...].r = (unsigned char)(255 * clamp(color[0]));
-    buffer[...].g = (unsigned char)(255 * clamp(color[1]);
-    buffer[...].b = (unsigned char)(255 * clamp(color[2]);
-
-
-  }
-        */
-        if (t > 0 && t < best_t) {
-          best_t = t;
+        if (t > 0 && t < closest_t) {
+          closest_t = t;
+          closest_object = objects[i];
+          // We have the closest object..
+			  	double color[3];
+	    	  color[0] = 0; // ambient_color[0];
+	      	color[1] = 0; // ambient_color[1];
+	    	  color[2] = 0; // ambient_color[2];
+	    	  for (int j=0; lights[j] != NULL; j+=1) {
+			      // Shadow test
+			      Ron[0] = closest_t * Rd[0] + Ro[0];
+			      Ron[1] = closest_t * Rd[1] + Ro[1];
+			      Ron[2] = closest_t * Rd[2] + Ro[2];
+			      Rdn[0] = lights[j]->position[0] - Ron[0];
+			      Rdn[1] = lights[j]->position[1] - Ron[1];
+			      Rdn[2] = lights[j]->position[2] - Ron[2];
+			      double distance_to_light = vector_length(Rdn);
+			      double shadow_t;
+			      closest_shadow_object = NULL;
+			      for (int k=0; objects[k] != NULL; k+=1) {
+							if (objects[k] == closest_object) {
+								continue;
+							} 
+							switch(objects[i]->type) {
+							case 0:
+							  shadow_t = sphere_intersection(Ro, Rd, objects[i]->position, objects[i]->sphere.radius);
+							  break;
+							case 1:
+				        shadow_t = plane_intersection(Ro, Rd, objects[i]->position, objects[i]->plane.normal);
+							  break;
+							default:
+							  printf("Error: Unknown object type. Element: %d\n", i);	
+				        exit(1);
+							}
+							if (0 < shadow_t && shadow_t < distance_to_light) {
+							  closest_shadow_object;
+							  break;
+							}
+			      }
+			      if (closest_shadow_object == NULL) {
+							// N, L, R, V
+							double N[3];
+							double L[3];
+							double R[3];
+							double V[3];
+							double radial_light;
+							double angular_light;
+							//Get N
+							if(closest_object->type == 0){
+								N[0] = closest_object->plane.normal[0]; // plane	
+								N[1] = closest_object->plane.normal[1];
+								N[2] = closest_object->plane.normal[2];
+							}
+							else if(closest_object->type == 1){
+								N[0] = Ron[0] - closest_object->position[0]; // sphere
+								N[1] = Ron[1] - closest_object->position[1];
+								N[2] = Ron[2] - closest_object->position[2];
+							}
+							else{
+								printf("Error: Unknown object type. Element: %d\n", i);	
+				        exit(1);
+							}
+							normalize(N);
+							//Get L
+							L[0] = Rdn[0]; // light_position - Ron;
+							L[1] = Rdn[1];
+							L[2] = Rdn[2];
+							normalize(L);
+							//Get R
+							get_reflection(N, L, R);
+							normalize(R);
+							//Get V
+							V[0] = Rd[0];
+							V[1] = Rd[1];
+							V[2] = Rd[2];
+							normalize(V);
+							double diffuse[3];
+							diffuse[0] = calculate_diffuse(closest_object->diffuse_color[0], lights[j]->color[0], N, L);
+							diffuse[1] = calculate_diffuse(closest_object->diffuse_color[1], lights[j]->color[1], N, L);
+							diffuse[2] = calculate_diffuse(closest_object->diffuse_color[2], lights[j]->color[2], N, L);
+							//double* specular[3];
+							radial_light = frad(lights[j], distance_to_light);
+							//angular_light = fang();
+							color[0] += radial_light * (diffuse[0] /*+ specular[0]*/);
+							color[1] += radial_light * (diffuse[1] /*+ specular[1]*/);
+							color[2] += radial_light * (diffuse[2] /*+ specular[2]*/);
+			      }
+			    }
           int position = (height-(y+1))*width+x;
-          buffer[position].r = (unsigned char) 255*objects[i]->color[0];
-          buffer[position].g = (unsigned char) 255*objects[i]->color[1];
-          buffer[position].b = (unsigned char) 255*objects[i]->color[2];
+          buffer[position].r = (unsigned char)(255 * clamp(color[0]));
+	    	  buffer[position].g = (unsigned char)(255 * clamp(color[1]));
+	    	  buffer[position].b = (unsigned char)(255 * clamp(color[2]));
         }
-        if (best_t > 0 && best_t != INFINITY) {
-
+        if (closest_t > 0 && closest_t != INFINITY) {
+        	//do nothing
         } 
         else {
           int position = (height-(y+1))*width+x;
@@ -767,6 +837,17 @@ void generate_scene(Camera* camera, Object** objects, Pixel* buffer, int width, 
       }
     }
   } 
+}
+
+double frad(Light * light, double t){
+	return (1/(light->radial_a2*t*t+light->radial_a1*t+light->radial_a0));
+}
+
+double* fang(){
+	//if light theta = 0 or no direction, return 1
+	//if Vobj.Vlight > cos(theta), return 0
+	//else, return (Vobj.Vlight)^angular-a0
+	return 0;
 }
 
 void write_p3(Pixel *buffer, FILE *output_file, int width, int height, int max_color){
@@ -783,3 +864,59 @@ void write_p3(Pixel *buffer, FILE *output_file, int width, int height, int max_c
     }
   }
 }
+
+double dot_product(double *v1, double *v2){
+	//dot_product currently ONLY FOR 3D VECTORS
+	return (v1[0]*v2[0]+v1[1]*v2[1]+v1[2]*v2[2]);
+}
+
+double vector_length(double *vector){
+	//vector_length currently ONLY FOR 3D VECTORS
+	return sqrt(sqr(vector[0])+sqr(vector[1])+sqr(vector[2]));
+}
+
+void get_reflection(double *N, double *L, double *result){
+	//(2N.L)*N-L
+	double dot_result; 
+	dot_result = dot_product(N, L);
+	double scalar = 2*dot_result;
+	scalar_multiply_vector(N, scalar);
+	subtract_vectors(N, L, result);
+
+}
+
+void subtract_vectors(double *v1, double *v2, double *result){
+	result[0] = v2[0] - v1[0];
+	result[1] = v2[1] - v1[1];
+	result[2] = v2[2] - v1[2];
+}
+
+void scalar_multiply_vector(double *vector, double scalar){
+	vector[0] = vector[0]*scalar;
+	vector[1] = vector[1]*scalar;
+	vector[2] = vector[2]*scalar;
+}
+
+double calculate_diffuse(double object_diff_color, double light_color, double *N, double *L){
+	double dot_result; 
+	dot_result = dot_product(N, L);
+	if(dot_result > 0){
+		return object_diff_color*light_color*dot_result;
+	}
+	else{
+		return 0;
+	}
+}
+
+double clamp(double value){
+	if (value < 0){
+		return 0;
+	}
+	else if (value > 1){
+		return 1;
+	}
+	else{
+		return value;
+	}
+}
+
