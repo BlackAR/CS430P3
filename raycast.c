@@ -96,7 +96,11 @@ double dot_product(double *v1, double *v2);
 
 void subtract_vectors(double *v1, double *v2, double *result);
 
-void scalar_multiply_vector(double *vector, double scalar);
+void scalar_multiply_vector(double *vector, double scalar, double *result);
+
+double calculate_specular(double *L, double *N, double *R, double *V, double object_spec_color, double light_color);
+
+double fang(Light *light, double *L);
 
 //Global variable for tracking during reading of JSON file, to report errors.
 int line = 1;
@@ -356,7 +360,6 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
         fclose(json);
         exit(1);
       }
-      printf("Type: %d\n", current_type);
       skip_ws(json);
 
       while (1) {
@@ -703,7 +706,7 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
   double pixwidth = camera_width / width;
   double Ron[3];
   double Rdn[3];
-  Object *closest_shadow_object;
+  int closest_shadow_object;
 
   for (int y = 0; y < height; y += 1) {
     for (int x = 0; x < width; x += 1) {
@@ -735,6 +738,8 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
         if (t > 0 && t < closest_t) {
           closest_t = t;
           closest_object = objects[i];
+				}
+        if (closest_t > 0 && closest_t != INFINITY) {
           // We have the closest object..
 			  	double color[3];
 	    	  color[0] = 0; // ambient_color[0];
@@ -749,29 +754,30 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
 			      Rdn[1] = lights[j]->position[1] - Ron[1];
 			      Rdn[2] = lights[j]->position[2] - Ron[2];
 			      double distance_to_light = vector_length(Rdn);
+			      normalize(Rdn);
 			      double shadow_t;
-			      closest_shadow_object = NULL;
+			      closest_shadow_object = 0;
 			      for (int k=0; objects[k] != NULL; k+=1) {
 							if (objects[k] == closest_object) {
 								continue;
 							} 
-							switch(objects[i]->type) {
+							switch(objects[k]->type) {
 							case 0:
-							  shadow_t = sphere_intersection(Ro, Rd, objects[i]->position, objects[i]->sphere.radius);
+							  shadow_t = sphere_intersection(Ron, Rdn, objects[k]->position, objects[k]->sphere.radius);
 							  break;
 							case 1:
-				        shadow_t = plane_intersection(Ro, Rd, objects[i]->position, objects[i]->plane.normal);
+				        shadow_t = plane_intersection(Ron, Rdn, objects[k]->position, objects[k]->plane.normal);
 							  break;
 							default:
 							  printf("Error: Unknown object type. Element: %d\n", i);	
 				        exit(1);
 							}
 							if (0 < shadow_t && shadow_t < distance_to_light) {
-							  closest_shadow_object;
+							  closest_shadow_object = 1;
 							  break;
-							}
+								}
 			      }
-			      if (closest_shadow_object == NULL) {
+			      if (closest_shadow_object == 0) {
 							// N, L, R, V
 							double N[3];
 							double L[3];
@@ -780,12 +786,12 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
 							double radial_light;
 							double angular_light;
 							//Get N
-							if(closest_object->type == 0){
+							if(closest_object->type == 1){
 								N[0] = closest_object->plane.normal[0]; // plane	
 								N[1] = closest_object->plane.normal[1];
 								N[2] = closest_object->plane.normal[2];
 							}
-							else if(closest_object->type == 1){
+							else if(closest_object->type == 0){
 								N[0] = Ron[0] - closest_object->position[0]; // sphere
 								N[1] = Ron[1] - closest_object->position[1];
 								N[2] = Ron[2] - closest_object->position[2];
@@ -804,29 +810,30 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
 							get_reflection(N, L, R);
 							normalize(R);
 							//Get V
-							V[0] = Rd[0];
-							V[1] = Rd[1];
-							V[2] = Rd[2];
+							V[0] = -1*Rd[0];
+							V[1] = -1*Rd[1];
+							V[2] = -1*Rd[2];
 							normalize(V);
-							double diffuse[3];
+					 		double diffuse[3];
 							diffuse[0] = calculate_diffuse(closest_object->diffuse_color[0], lights[j]->color[0], N, L);
 							diffuse[1] = calculate_diffuse(closest_object->diffuse_color[1], lights[j]->color[1], N, L);
 							diffuse[2] = calculate_diffuse(closest_object->diffuse_color[2], lights[j]->color[2], N, L);
-							//double* specular[3];
+							double specular[3];
+							specular[0] = calculate_specular(L, N, R, V, closest_object->specular_color[0], lights[j]->color[0]);
+							specular[1] = calculate_specular(L, N, R, V, closest_object->specular_color[1], lights[j]->color[1]);
+							specular[2] = calculate_specular(L, N, R, V, closest_object->specular_color[2], lights[j]->color[2]);
 							radial_light = frad(lights[j], distance_to_light);
-							//angular_light = fang();
-							color[0] += radial_light * (diffuse[0] /*+ specular[0]*/);
-							color[1] += radial_light * (diffuse[1] /*+ specular[1]*/);
-							color[2] += radial_light * (diffuse[2] /*+ specular[2]*/);
+							angular_light = fang(lights[j], L);
+							color[0] += radial_light * angular_light * (diffuse[0] + specular[0]);
+							color[1] += radial_light * angular_light * (diffuse[1] + specular[1]);
+							color[2] += radial_light * angular_light * (diffuse[2] + specular[2]);
 			      }
 			    }
           int position = (height-(y+1))*width+x;
           buffer[position].r = (unsigned char)(255 * clamp(color[0]));
 	    	  buffer[position].g = (unsigned char)(255 * clamp(color[1]));
 	    	  buffer[position].b = (unsigned char)(255 * clamp(color[2]));
-        }
-        if (closest_t > 0 && closest_t != INFINITY) {
-        	//do nothing
+        
         } 
         else {
           int position = (height-(y+1))*width+x;
@@ -843,7 +850,33 @@ double frad(Light * light, double t){
 	return (1/(light->radial_a2*t*t+light->radial_a1*t+light->radial_a0));
 }
 
-double* fang(){
+double fang(Light *light, double *L){
+	double light_length = vector_length(light->direction);
+	double theta = light->theta;
+	double dot_result;
+	double light_vector[3];
+
+	theta = theta*M_PI/180; //convert degrees to radians
+	theta = cos(theta); 
+	
+	light_vector[0] = light->direction[0];
+	light_vector[1] = light->direction[1];
+	light_vector[2] = light->direction[2];
+	
+	normalize(light_vector);
+	
+	if(light->theta == 0 || light_length == 0){
+		return 1;
+	}
+	else{	
+		dot_result = dot_product(light_vector, L);
+		if (dot_result > theta){
+			return 0;
+		}
+		else{
+			return pow(dot_result, light->angular_a0);
+		}
+	}
 	//if light theta = 0 or no direction, return 1
 	//if Vobj.Vlight > cos(theta), return 0
 	//else, return (Vobj.Vlight)^angular-a0
@@ -877,11 +910,11 @@ double vector_length(double *vector){
 
 void get_reflection(double *N, double *L, double *result){
 	//(2N.L)*N-L
-	double dot_result; 
-	dot_result = dot_product(N, L);
-	double scalar = 2*dot_result;
-	scalar_multiply_vector(N, scalar);
-	subtract_vectors(N, L, result);
+	double dot_result;
+	double temp_vector[3]; 
+	dot_result = 2*dot_product(N, L);
+	scalar_multiply_vector(N, dot_result, temp_vector);
+	subtract_vectors(L, temp_vector, result);
 
 }
 
@@ -891,10 +924,10 @@ void subtract_vectors(double *v1, double *v2, double *result){
 	result[2] = v2[2] - v1[2];
 }
 
-void scalar_multiply_vector(double *vector, double scalar){
-	vector[0] = vector[0]*scalar;
-	vector[1] = vector[1]*scalar;
-	vector[2] = vector[2]*scalar;
+void scalar_multiply_vector(double *vector, double scalar, double *result){
+	result[0] = vector[0]*scalar;
+	result[1] = vector[1]*scalar;
+	result[2] = vector[2]*scalar;
 }
 
 double calculate_diffuse(double object_diff_color, double light_color, double *N, double *L){
@@ -902,6 +935,19 @@ double calculate_diffuse(double object_diff_color, double light_color, double *N
 	dot_result = dot_product(N, L);
 	if(dot_result > 0){
 		return object_diff_color*light_color*dot_result;
+	}
+	else{
+		return 0;
+	}
+}
+
+double calculate_specular(double *L, double *N, double *R, double *V, double object_spec_color, double light_color){  //ADD PROTOTYPE
+	double V_dot_R;
+	double N_dot_L;
+	V_dot_R = dot_product(V, R);
+	N_dot_L = dot_product(N, L);
+	if(V_dot_R > 0 && N_dot_L > 0){
+		return object_spec_color * light_color * pow(V_dot_R, 20);
 	}
 	else{
 		return 0;
