@@ -54,6 +54,8 @@ typedef struct Pixel{
 
 //PROTOTYPE DECLARATIONS
 
+//--------------JSON READING FUNCTIONS----------------------
+
 int next_c(FILE* json);
 
 void expect_c(FILE* json, int d);
@@ -68,39 +70,44 @@ double* next_vector(FILE* json);
 
 void read_scene(char* filename, Camera* camera, Object** objects, Light** lights);
 
-double sqr(double v);
+//--------------VECTOR FUNCTIONS----------------------
+void vector_normalize(double* v);
 
-void normalize(double* v);
+double vector_dot_product(double *v1, double *v2);
+
+double vector_length(double *vector);
+
+void vector_reflection(double *N, double *L, double *result);
+
+void vector_subtraction(double *v1, double *v2, double *result);
+
+void vector_scale(double *vector, double scalar, double *result);
+
+//--------------INTERSECTION FUNCTIONS----------------------
 
 double sphere_intersection(double* Ro, double* Rd, double* C, double r);
 
 double plane_intersection(double* Ro, double* Rd, double* P, double* N);
 
+//--------------LIGHT FUNCTIONS----------------------
+
+double calculate_diffuse(double object_diff_color, double light_color, double *N, double *L);
+
+double calculate_specular(double *L, double *N, double *R, double *V, double object_spec_color, double light_color);
+
+double frad(Light * light, double t);
+
+double fang(Light *light, double *L);
+
+//--------------IMAGE FUNCTIONS----------------------
+
 void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buffer, int width, int height);
 
 void write_p3(Pixel *buffer, FILE *output_file, int width, int height, int max_color);
 
-double dot_product(double *v1, double *v2);
-
-double vector_length(double *vector);
-
-void get_reflection(double *N, double *L, double *result);
-
-double calculate_diffuse(double object_diff_color, double light_color, double *N, double *L);
-
-double frad(Light * light, double t);
-
 double clamp(double value);
 
-double dot_product(double *v1, double *v2);
-
-void subtract_vectors(double *v1, double *v2, double *result);
-
-void scalar_multiply_vector(double *vector, double scalar, double *result);
-
-double calculate_specular(double *L, double *N, double *R, double *V, double object_spec_color, double light_color);
-
-double fang(Light *light, double *L);
+//===========================================================================================================
 
 //Global variable for tracking during reading of JSON file, to report errors.
 int line = 1;
@@ -108,10 +115,26 @@ int line = 1;
 //FUNCTIONS
 
 int main(int argc, char *argv[]) {
-  //ensures the correct number are passed in
+	/*
+	inputs:
+		int argc: the number of arguments in argv[]. Should be 5.
+		char *argv[]: the arguments in this should be: 
+		  filepath (implicit)
+		  width (a number value greater than 0)
+		  height (a number value greater than 0)
+		  input filename of JSON file (must exist)
+		  output filename of PPM file (does not need to exist)
+	output:
+		void
+	function:
+		this program takes in a JSON file and generates an image to
+		the filename passed in with the given width and height.
+	*/
+  
   #ifdef DEBUG
     printf("Checking arguments...\n");
   #endif
+  //ensures the correct number are passed in
   if (argc != 5){
     fprintf(stderr, "Error: Insufficient Arguments. Arguments provided: %d.\n", argc);
   }
@@ -166,12 +189,34 @@ int main(int argc, char *argv[]) {
   #endif
   write_p3(buffer, output_file, width, height, 255);
   fclose(output_file);
+  //free memory
+  //objects
+  for(int i = 0; lights[i]!=NULL; i+=1){
+  	free(objects[i]);
+  }
+  free(objects);
+  //lights
+  for(int i = 0; lights[i]!=NULL; i+=1){
+  	free(lights[i]);
+  }
+  free(lights);
+  //camera
+  free(camera);
   return EXIT_SUCCESS;
 }
 
-int next_c(FILE* json) {
-  // next_c() wraps the getc() function and provides error checking and line
-  // number maintenance
+//--------------JSON READING FUNCTIONS----------------------
+
+int next_c(FILE *json) {
+	/*
+	inputs: 
+		FILE *json: the JSON file
+	output:
+		int: value of character
+	function:
+		next_c() wraps the getc() function and provides error checking and line
+  	number maintenance
+	*/
   int c = fgetc(json);
   #ifdef DEBUG
     printf("next_c: '%c'\n", c);
@@ -188,9 +233,17 @@ int next_c(FILE* json) {
 }
 
 
-void expect_c(FILE* json, int d) {
-  // expect_c() checks that the next character is d.  If it is not it emits
-  // an error.
+void expect_c(FILE *json, int d) {
+	/*
+	inputs:
+		FILE *json: the JSON file to be read
+		int d: the integer value of the expected character to read
+	output:
+		void
+	function:
+		expect_c() checks that the next character is d.  If it is not it emits
+  	an error.
+	*/
   int c = next_c(json);
   if (c == d) return;
   fprintf(stderr, "Error: Expected '%c' on line %d.\n", d, line);
@@ -199,8 +252,15 @@ void expect_c(FILE* json, int d) {
 }
 
 
-void skip_ws(FILE* json) {
-  // skip_ws() skips white space in the file.
+void skip_ws(FILE *json) {
+	/*
+	inputs:
+		FILE *json: the JSON file to be read
+	output:
+		void
+	function:
+		skip_ws() skips white space in the file.
+	*/
   int c = next_c(json);
   while (isspace(c)) {
     c = next_c(json);
@@ -208,9 +268,16 @@ void skip_ws(FILE* json) {
   ungetc(c, json);
 }
 
-char* next_string(FILE* json) {
-  // next_string() gets the next string from the file handle and emits an error
-  // if a string can not be obtained. 
+char* next_string(FILE *json) {
+	/*
+	inputs:
+		FILE *json: the JSON file to be read
+	output:
+		char*: pointer to the string read
+	function:
+		next_string() gets the next string from the file handle and emits an error
+  	if a string can not be obtained. 
+	*/
   char buffer[129];
   int c = next_c(json);
   if (c != '"') {
@@ -244,7 +311,15 @@ char* next_string(FILE* json) {
   return strdup(buffer);
 }
 
-double next_number(FILE* json) {
+double next_number(FILE *json) {
+	/*
+	inputs:
+		FILE *json: the JSON file to be read
+	output:
+		double: number read from file
+	function:
+		next_number() reads the next number in the JSON
+	*/
   double value;
   int count = fscanf(json, "%lf", &value);
   if (count != 1){
@@ -255,7 +330,16 @@ double next_number(FILE* json) {
   return value;
 }
 
-double* next_vector(FILE* json) {
+double* next_vector(FILE *json) {
+	/*
+	inputs:
+		FILE *json: The JSON file to be read
+	output:
+		double*: pointer to the vector read in
+	function:
+		next_vector() reads in the next 3D vector from the JSON
+		and returns it as a pointer to a double array of size 3.
+	*/
   double* v = malloc(3*sizeof(double));
   expect_c(json, '[');
   skip_ws(json);
@@ -273,7 +357,21 @@ double* next_vector(FILE* json) {
   return v;
 }
 
-void read_scene(char* filename, Camera* camera, Object** objects, Light** lights) {
+void read_scene(char *filename, Camera *camera, Object **objects, Light **lights) {
+  /*
+	inputs:
+		char *filename: name of JSON file to be read
+		Camera *camera: Camera object to store the viewpointof the picture
+		Object **objects: Object array to store spheres and planes read from JSON
+		Light **lights: Light array to store lights read 
+	output:
+		void
+	function:
+		read_scene() reads a JSON file and stores:
+		1 Camera
+		up to 128 Objects
+		up to 128 Lights
+	*/
   int c;
   int current_light = -1;
   int current_item = -1; //for tracking the current object in the Object array
@@ -449,11 +547,10 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           else if(strcmp(key, "diffuse_color") == 0){ 
             if(current_type == 1 || current_type == 2){  //only spheres and planes have diffuse color
                 double* vector = next_vector(json);
-                objects[current_item]->diffuse_color[0] = (*vector);
-                vector++;
-                objects[current_item]->diffuse_color[1] = (*vector);
-                vector++;
-                objects[current_item]->diffuse_color[2] = (*vector); 
+                objects[current_item]->diffuse_color[0] = vector[0];
+                objects[current_item]->diffuse_color[1] = vector[1];
+                objects[current_item]->diffuse_color[2] = vector[2];
+                free(vector);
             }
             else{
               fprintf(stderr, "Error: Non-object type has color value on line number %d.\n", line);
@@ -464,11 +561,10 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           else if(strcmp(key, "specular_color") == 0){ 
             if(current_type == 1 || current_type == 2){  //only spheres and planes have specular color
                 double* vector = next_vector(json);
-                objects[current_item]->specular_color[0] = (*vector);
-                vector++;
-                objects[current_item]->specular_color[1] = (*vector);
-                vector++;
-                objects[current_item]->specular_color[2] = (*vector); 
+                objects[current_item]->specular_color[0] = vector[0];
+                objects[current_item]->specular_color[1] = vector[1];
+                objects[current_item]->specular_color[2] = vector[2];
+                free(vector);
             }
             else{
               fprintf(stderr, "Error: Non-object type has color value on line number %d.\n", line);
@@ -479,11 +575,10 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           else if(strcmp(key, "color") == 0){ 
             if(current_type == 3){  //only lights have color
                 double* vector = next_vector(json);
-                lights[current_light]->color[0] = (*vector);
-                vector++;
-                lights[current_light]->color[1] = (*vector);
-                vector++;
-                lights[current_light]->color[2] = (*vector); 
+                lights[current_light]->color[0] = vector[0];
+                lights[current_light]->color[1] = vector[1];
+                lights[current_light]->color[2] = vector[2]; 
+                free(vector);
             }
             else{
               fprintf(stderr, "Error: Non-light type has color value on line number %d.\n", line);
@@ -494,15 +589,17 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           else if(strcmp(key, "position") == 0){
             if(current_type == 1 || current_type == 2){  //only spheres and planes have position
               double* vector = next_vector(json);
-              objects[current_item]->position[0] = (*vector++);
-              objects[current_item]->position[1] = (*vector++);
-              objects[current_item]->position[2] = (*vector++);  
+              objects[current_item]->position[0] = vector[0];
+              objects[current_item]->position[1] = vector[1];
+              objects[current_item]->position[2] = vector[2];
+              free(vector);
             }
             else if(current_type == 3){  //only spheres and planes have position
               double* vector = next_vector(json);
-              lights[current_light]->position[0] = (*vector++);
-              lights[current_light]->position[1] = (*vector++);
-              lights[current_light]->position[2] = (*vector++);  
+              lights[current_light]->position[0] = vector[0];
+              lights[current_light]->position[1] = vector[1];
+              lights[current_light]->position[2] = vector[2];  
+              free(vector);
             }
             else{
               fprintf(stderr, "Error: Camera type has position value on line number %d.\n", line);
@@ -513,9 +610,10 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           else if(strcmp(key, "normal") == 0){
             if(current_type == 2){  //only planes have normal
               double* vector = next_vector(json);
-              objects[current_item]->plane.normal[0] = (*vector++);
-              objects[current_item]->plane.normal[1] = (*vector++);
-              objects[current_item]->plane.normal[2] = (*vector++);  
+              objects[current_item]->plane.normal[0] = vector[0];
+              objects[current_item]->plane.normal[1] = vector[1];
+              objects[current_item]->plane.normal[2] = vector[2];  
+              free(vector);
             }
             else{
               fprintf(stderr, "Error: Only planes have normal values on line number %d.\n", line);
@@ -526,9 +624,10 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
           else if(strcmp(key, "direction") == 0){
             if(current_type == 3){  //only planes have normal
               double* vector = next_vector(json);
-              lights[current_light]->direction[0] = (*vector++);
-              lights[current_light]->direction[1] = (*vector++);
-              lights[current_light]->direction[2] = (*vector++);  
+              lights[current_light]->direction[0] = vector[0];
+              lights[current_light]->direction[1] = vector[1];
+              lights[current_light]->direction[2] = vector[2];  
+              free(vector);
             }
             else{
               fprintf(stderr, "Error: Only planes have normal values on line number %d.\n", line);
@@ -584,67 +683,172 @@ void read_scene(char* filename, Camera* camera, Object** objects, Light** lights
   }
 }
 
-double sqr(double v) {return v*v;}
+//--------------VECTOR FUNCTIONS----------------------
 
-void normalize(double* v) {
-  double len = sqrt(sqr(v[0]) + sqr(v[1]) + sqr(v[2]));
+void vector_normalize(double *v) {
+	/*
+	inputs:
+		double *v: vector to be normalize
+	output:
+		void
+	function:
+		vector_normalize() divides a vector by it's length to get a unit vector
+	*/
+  double len = sqrt(pow(v[0], 2) + pow(v[1], 2) + pow(v[2], 2));
   v[0] /= len;
   v[1] /= len;
   v[2] /= len;
 }
 
-double sphere_intersection(double* Ro, double* Rd, double* C, double r) {
-  // Step 1. Find the equation for the object you are
-  // interested in..  (e.g., sphere)
-  //
-  // x^2 + y^2 + z^2 = r^2
-  //
-  // Step 2. Parameterize the equation with a center point
-  // if needed
-  //
-  // (x-Cx)^2 + (y-Cy)^2 + (z-Cz)^2 = r^2
-  //
-  // Step 3. Substitute the eq for a ray into our object
-  // equation.
-  //
-  // (Rox + t*Rdx - Cx)^2 + (Roy + t*Rdy - Cy)^2 + (Roz + t*Rdz - Cz)^2 - r^2 = 0
-  //
-  // Step 4. Solve for t.
-  //
-  // Step 4a. Rewrite the equation (flatten).
-  //
-  // -r^2 +
-  // t^2 * Rdx^2 +
-  // t^2 * Rdy^2 +
-  // t^2 * Rdz^2 +
-  // 2*t * Rox * Rdx -
-  // 2*t * Rdx * Cx +
-  // 2*t * Roy * Rdy -
-  // 2*t * Rdy * Cy +
-  // 2*t * Roz * Rdz -
-  // 2*t * Rdz * Cz +
-  // Rox^2 -
-  // 2*Rox*Cx +
-  // Cx^2 +
-  // Roy^2 -
-  // 2*Roy*Cy +
-  // Cy^2 +
-  // Roz^2 -
-  // 2*Roz*Cz +
-  // Cz^2 = 0
-  //
-  // Steb 4b. Rewrite the equation in terms of t.
-  //
-  // t^2 * (Rdx^2 + Rdy^2 + Rdz^2) +
-  // t * (2 * (Rox * Rdx - Rdx * Cx + Roy * Rdy - Rdy *Cy Roz * Rdz - Rdz * Cz)) +
-  // Rox^2 - 2*Rox*Cx + Cx^2 + Roy^2 - 2*Roy*Cy + Cy^2  + Roz^2 - 2*Roz*Cz + Cz^2 - r^2 = 0
-  //
-  // Use the quadratic equation to solve for t..
-  double a = (sqr(Rd[0]) + sqr(Rd[1]) + sqr(Rd[2]));
-  double b = (2 * (Ro[0] * Rd[0] - Rd[0] * C[0] + Ro[1] * Rd[1] - Rd[1] * C[1] + Ro[2] * Rd[2] - Rd[2] * C[2]));
-  double c = sqr(Ro[0]) - 2*Ro[0]*C[0] + sqr(C[0]) + sqr(Ro[1]) - 2*Ro[1]*C[1] + sqr(C[1]) + sqr(Ro[2]) - 2*Ro[2]*C[2] + sqr(C[2]) - sqr(r);
+double vector_dot_product(double *v1, double *v2){
+	/*
+	inputs:
+		double *v1: 3D vector
+		double *v2: 3D vector
+	output:
+		double: dot product of the two vectors
+	function:
+		vector_dot_product() dots two 3D vectors together and returns the value
+	*/
+	return (v1[0]*v2[0]+v1[1]*v2[1]+v1[2]*v2[2]);
+}
 
-  double det = sqr(b) - 4 * a * c;
+double vector_length(double *vector){
+	/*
+	inputs:
+		double *vector: 3D vector
+	output:
+		double: length of vector
+	function:
+		vector_length() takes in a 3D vector and returns the length of the vector
+		which is the square root of the sum of the squared vector components.
+	*/
+	return sqrt(pow(vector[0], 2)+pow(vector[1], 2)+pow(vector[2], 2));
+}
+
+void vector_reflection(double *N, double *L, double *result){
+	/*
+	inputs:
+		double *N: Normal vector of object
+		double *L: Light vector to object
+		double *result: the vector to store the result
+	output:
+		void
+	function:
+		vector_reflection() gets the reflection of the light vector
+		along the normal vector of the surface it is hitting by using
+		the equation:
+		R=(2N.L)*N-L
+	*/
+	double dot_result;
+	double temp_vector[3]; 
+	dot_result = 2*vector_dot_product(N, L);
+	vector_scale(N, dot_result, temp_vector);
+	vector_subtraction(L, temp_vector, result);
+
+}
+
+void vector_subtraction(double *v1, double *v2, double *result){
+	/*
+	inputs:
+		double *v1: 3D vector origin
+		double *v2: 3D vector destination
+		double *result: 3D vector to store the resulting vector
+	output:
+		void
+	function:
+		vector_subtraction() subtracts v2 from v1 and stores it in result
+	*/
+	result[0] = v2[0] - v1[0];
+	result[1] = v2[1] - v1[1];
+	result[2] = v2[2] - v1[2];
+}
+
+void vector_scale(double *vector, double scalar, double *result){
+	/*
+	inputs:
+		double *vector: 3D vector
+		double scalar: value to scale vector by
+		double *result: 3D vector to store the result
+	output:
+		void
+	function:
+		vector_scale() multiplies a vector by a scalar
+	*/
+	result[0] = vector[0]*scalar;
+	result[1] = vector[1]*scalar;
+	result[2] = vector[2]*scalar;
+}
+
+//--------------INTERSECTION FUNCTIONS----------------------
+
+double sphere_intersection(double *Ro, double *Rd, double *C, double r) {
+	/*
+	inputs: 
+		double *Ro: origin point of ray (light or camera)
+		double *Rd: direction the light/camera is pointing
+		double *C: the center of the sphere
+		doube r: the radius of the sphere
+	output:
+		double: the length at which the ray intersects the sphere
+	function:
+		sphere_intersection() takes a ray (light or camera) and 
+		a sphere, and calculates the distance to the intersection of
+		the sphere. If the ray intersects the sphere at two points, 
+		returns the closest of the two. If no intersection occurs, a
+		value of -1 is returned. The following process is used:
+		Step 1. Find the equation for the object you are
+	  interested in..  (e.g., sphere)
+	  
+	  
+	  x^2 + y^2 + z^2 = r^2
+	  Step 2. Parameterize the equation with a center point
+	  if needed
+	  
+	  (x-Cx)^2 + (y-Cy)^2 + (z-Cz)^2 = r^2
+	  
+	  Step 3. Substitute the eq for a ray into our object
+	  equation.
+	  
+	  (Rox + t*Rdx - Cx)^2 + (Roy + t*Rdy - Cy)^2 + (Roz + t*Rdz - Cz)^2 - r^2 = 0
+	  
+	  Step 4. Solve for t.
+	  
+	  Step 4a. Rewrite the equation (flatten).
+	  
+	  -r^2 +
+	  t^2 * Rdx^2 +
+	  t^2 * Rdy^2 +
+	  t^2 * Rdz^2 +
+	  2*t * Rox * Rdx -
+	  2*t * Rdx * Cx +
+	  2*t * Roy * Rdy -
+	  2*t * Rdy * Cy +
+	  2*t * Roz * Rdz -
+	  2*t * Rdz * Cz +
+	  Rox^2 -
+	  2*Rox*Cx +
+	  Cx^2 +
+	  Roy^2 -
+	  2*Roy*Cy +
+	  Cy^2 +
+	  Roz^2 -
+	  2*Roz*Cz +
+	  Cz^2 = 0
+	  
+	  Steb 4b. Rewrite the equation in terms of t.
+	  
+	  t^2 * (Rdx^2 + Rdy^2 + Rdz^2) +
+	  t * (2 * (Rox * Rdx - Rdx * Cx + Roy * Rdy - Rdy *Cy Roz * Rdz - Rdz * Cz)) +
+	  Rox^2 - 2*Rox*Cx + Cx^2 + Roy^2 - 2*Roy*Cy + Cy^2  + Roz^2 - 2*Roz*Cz + Cz^2 - r^2 = 0
+	  
+	  Use the quadratic equation to solve for t..
+  */
+  double a = (pow(Rd[0], 2) + pow(Rd[1], 2) + pow(Rd[2], 2));
+  double b = (2 * (Ro[0] * Rd[0] - Rd[0] * C[0] + Ro[1] * Rd[1] - Rd[1] * C[1] + Ro[2] * Rd[2] - Rd[2] * C[2]));
+  double c = pow(Ro[0], 2) - 2*Ro[0]*C[0] + pow(C[0], 2) + pow(Ro[1], 2) - 2*Ro[1]*C[1] + pow(C[1], 2) + pow(Ro[2], 2) - 2*Ro[2]*C[2] + pow(C[2], 2) - pow(r, 2);
+
+  double det = pow(b, 2) - 4 * a * c;
   if (det < 0) return -1;
 
   det = sqrt(det);
@@ -658,48 +862,190 @@ double sphere_intersection(double* Ro, double* Rd, double* C, double r) {
   return -1;
 }
 
-double plane_intersection(double* Ro, double* Rd, double* P, double* N) {
-  // Step 1. Find the equation for the object you are
-  // interested in..  (e.g., plNW)
-  //
-  // Ax + By + Cz + D = 0 
-  //
-  // Step 2. Parameterize the equation with a center point
-  // if needed
-  //
-  // Since N = [A, B, C]
-  //
-  // Nx(x-Px) + Ny(y-Py) + Nz(z-Pz) = 0
-  //
-  // Step 3. Substitute the eq for a ray into our object
-  // equation.
-  //
-  // Nx(Rox + t*Rdx - Px) + Ny(Roy + t*Rdy - Py) + Nz(Roz + t*Rdz - Pz) = 0
-  //
-  // Step 4. Solve for t.
-  //
-  // Step 4a. Rewrite the equation (flatten).
-  //
-  // NxRox + t*Nx*Rdx - NxPx + NyRoy + t*Ny*Rdy - NyPy + NzRoz + t*Nz*Rdz - NzPz = 0
-  // 
-  // 
-  //
-  // Steb 4b. Rewrite the equation in terms of t.
-  //
-  // t(Nx*Rdx + Ny*Rdy + Nz*Rdz) = Nx*Px + Ny*Py + Nz*Pz - Nx*Rox - Ny*Roy - Nz*Roz
-  //
-  // t = (NxPx + NyPy + NzPz - NxRox - NyRoy - NzRoz)/(Nx*Rdx + Ny*Rdy + Nz*Rdz) 
-  //
+double plane_intersection(double *Ro, double *Rd, double *P, double *N) {
+	/*
+	inputs:
+		double *Ro: origin point of ray (light or camera)
+		double *Rd: direction the light/camera is pointing
+		double *P: the position of the plane
+		doube *N: the normal vector of the plane
+	output:
+		double: the length at which the ray intersects the plane 
+	function:
+		plane_intersection takes a ray from a camera or light and 
+		a plane, and returns the point at which the ray intersects
+		the plane. If an intersection does not occur, returns -1.
+		The following steps are used:
+  	Step 1. Find the equation for the object you are
+    interested in..  (e.g., plNW)
+  
+    Ax + By + Cz + D = 0 
+  
+    Step 2. Parameterize the equation with a center point
+    if needed
+  
+    Since N = [A, B, C]
+  
+    Nx(x-Px) + Ny(y-Py) + Nz(z-Pz) = 0
+  
+    Step 3. Substitute the eq for a ray into our object
+    equation.
+  
+    Nx(Rox + t*Rdx - Px) + Ny(Roy + t*Rdy - Py) + Nz(Roz + t*Rdz - Pz) = 0
+  
+    Step 4. Solve for t.
+  
+    Step 4a. Rewrite the equation (flatten).
+  
+    NxRox + t*Nx*Rdx - NxPx + NyRoy + t*Ny*Rdy - NyPy + NzRoz + t*Nz*Rdz - NzPz = 0
+    
+    Steb 4b. Rewrite the equation in terms of t.
+  
+    t(Nx*Rdx + Ny*Rdy + Nz*Rdz) = Nx*Px + Ny*Py + Nz*Pz - Nx*Rox - Ny*Roy - Nz*Roz
+  
+    t = (NxPx + NyPy + NzPz - NxRox - NyRoy - NzRoz)/(Nx*Rdx + Ny*Rdy + Nz*Rdz) 
+  */
   //normalize the normal vector
-  normalize(N);
+  vector_normalize(N);
   double t = (N[0]*P[0] + N[1]*P[1] + N[2]*P[2] - N[0]*Ro[0] - N[1]*Ro[1] - N[2]*Ro[2])/(N[0]*Rd[0] + N[1]*Rd[1] + N[2]*Rd[2]); 
   if (t > 0) return t;
 
   return -1;
 }
 
-void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buffer, int width, int height){
-  //write these objects to a ppm image
+//--------------LIGHT FUNCTIONS----------------------
+
+double calculate_diffuse(double object_diff_color, double light_color, double *N, double *L){
+	/*
+	inputs:
+		double object_diff_color: the value of one component of the diffuse color of the object (usually R, G, or B)
+		double light_color: the value of one component of the light color (usually R, G or B)
+		double *N: the normal vector of the surface
+		double *L: the light vector to the surface
+	output:
+		double: the color value of the diffuse light
+	function:
+		calculate_diffuse() returns the diffuse value of the light on the surface using the equation:
+		Kd*Il(N.L) if N.L>0
+		0 if N.L   otherwise
+	*/
+	double dot_result; 
+	dot_result = vector_dot_product(N, L);
+	if(dot_result > 0){
+		return object_diff_color*light_color*dot_result;
+	}
+	else{
+		return 0;
+	}
+}
+
+double calculate_specular(double *L, double *N, double *R, double *V, double object_spec_color, double light_color){
+	/*
+	inputs:
+		double *L: the vector of the light to the surface
+		double *N: the normal vector of the surface
+		double *R: the vector of the reflection of the light from the surface
+		double *V: the vector of the camera to the surface
+		double object_spec_color: the value of one component of the specular color of the object(usually R, G, or B)
+		double light_color: the value of one component of the light color (usually R, G or B)
+	output:
+		double: the color value of the specular light
+	function:
+		calculate_specular() calculates the specular value of the light on the surface using the equation:
+		Ks*Is(V.R)^ns   if V.R > 0 and N.L > 0
+		0								otherwise
+		ns is hard-coded to 20
+	*/
+	double V_dot_R;
+	double N_dot_L;
+	V_dot_R = vector_dot_product(V, R);
+	N_dot_L = vector_dot_product(N, L);
+	if(V_dot_R > 0 && N_dot_L > 0){
+		return object_spec_color * light_color * pow(V_dot_R, 20);
+	}
+	else{
+		return 0;
+	}
+}
+
+double frad(Light * light, double t){
+	/*
+	inputs: 
+		Light *light: the light object being used
+		double t: the distance to light
+	output:
+		double: the value the light should be scaled based on distance from light
+	function:
+		frad() calculates the intensity of the light on the surface according to
+		the equation:
+	  ______1_______
+	  a2*t^2+a1*t+a0
+	*/
+	return (1/(light->radial_a2*t*t+light->radial_a1*t+light->radial_a0));
+}
+
+double fang(Light *light, double *L){
+	/*
+	inputs:
+		Light *light: the light object 
+		double *L: the vector of the light to the surface
+	output:
+		double: the intensity of the light on the surface
+	function:
+		fang() calculates the intensity of a spotlight on the
+		surface.
+		If the light is not a spotlight, 1 is returned (full intensity)
+		If the object is outside the spotlight, 0 is returned (no intensity)
+		Otherwise, the equation used is:
+		(VLight.Vobj)^a0
+	*/
+	double light_length = vector_length(light->direction);
+	double theta = light->theta;
+	double dot_result;
+	double light_vector[3];
+
+	theta = theta*M_PI/180; //convert degrees to radians
+	theta = cos(theta); 
+	
+	light_vector[0] = light->direction[0];
+	light_vector[1] = light->direction[1];
+	light_vector[2] = light->direction[2];
+	
+	vector_normalize(light_vector);
+	
+	if(light->theta == 0 || light_length == 0){
+		return 1;
+	}
+	else{	
+		dot_result = vector_dot_product(light_vector, L);
+		if (dot_result > theta){
+			return 0;
+		}
+		else{
+			return pow(dot_result, light->angular_a0);
+		}
+	}
+	return 0;
+}
+
+//--------------IMAGE FUNCTIONS----------------------
+
+void generate_scene(Camera *camera, Object **objects, Light **lights, Pixel *buffer, int width, int height){
+	/*
+	inputs:
+		Camera *camera: the camera object which acts as the viewpoint to the scene
+		Object **objects: the array of objects to render in the scene
+		Light **lights: the array of lights to illuminate the scene
+		Pixel *buffer: the array of pixels to be used in writing the image
+		int width: the width for the final image
+		int height: the height of the final image
+	output:
+		void
+	function:
+		generates_scene() uses the camera, objects, and lights given to generate the scene, then
+		writes the scene to the pixel buffer.
+	*/
+  
   double camera_width = camera->width;
   double camera_height = camera->height;
   double pixheight = camera_height / height;
@@ -717,7 +1063,7 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
         0 - (camera_height/2) + pixheight * (y + 0.5),
         1
       };
-      normalize(Rd);
+      vector_normalize(Rd);
 
       double closest_t = INFINITY;
       Object * closest_object = NULL;
@@ -754,7 +1100,7 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
 			      Rdn[1] = lights[j]->position[1] - Ron[1];
 			      Rdn[2] = lights[j]->position[2] - Ron[2];
 			      double distance_to_light = vector_length(Rdn);
-			      normalize(Rdn);
+			      vector_normalize(Rdn);
 			      double shadow_t;
 			      closest_shadow_object = 0;
 			      for (int k=0; objects[k] != NULL; k+=1) {
@@ -800,20 +1146,20 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
 								printf("Error: Unknown object type. Element: %d\n", i);	
 				        exit(1);
 							}
-							normalize(N);
+							vector_normalize(N);
 							//Get L
 							L[0] = Rdn[0]; // light_position - Ron;
 							L[1] = Rdn[1];
 							L[2] = Rdn[2];
-							normalize(L);
+							vector_normalize(L);
 							//Get R
-							get_reflection(N, L, R);
-							normalize(R);
+							vector_reflection(N, L, R);
+							vector_normalize(R);
 							//Get V
 							V[0] = -1*Rd[0];
 							V[1] = -1*Rd[1];
 							V[2] = -1*Rd[2];
-							normalize(V);
+							vector_normalize(V);
 					 		double diffuse[3];
 							diffuse[0] = calculate_diffuse(closest_object->diffuse_color[0], lights[j]->color[0], N, L);
 							diffuse[1] = calculate_diffuse(closest_object->diffuse_color[1], lights[j]->color[1], N, L);
@@ -844,46 +1190,22 @@ void generate_scene(Camera* camera, Object** objects, Light** lights, Pixel* buf
       }
     }
   } 
-}
 
-double frad(Light * light, double t){
-	return (1/(light->radial_a2*t*t+light->radial_a1*t+light->radial_a0));
-}
-
-double fang(Light *light, double *L){
-	double light_length = vector_length(light->direction);
-	double theta = light->theta;
-	double dot_result;
-	double light_vector[3];
-
-	theta = theta*M_PI/180; //convert degrees to radians
-	theta = cos(theta); 
-	
-	light_vector[0] = light->direction[0];
-	light_vector[1] = light->direction[1];
-	light_vector[2] = light->direction[2];
-	
-	normalize(light_vector);
-	
-	if(light->theta == 0 || light_length == 0){
-		return 1;
-	}
-	else{	
-		dot_result = dot_product(light_vector, L);
-		if (dot_result > theta){
-			return 0;
-		}
-		else{
-			return pow(dot_result, light->angular_a0);
-		}
-	}
-	//if light theta = 0 or no direction, return 1
-	//if Vobj.Vlight > cos(theta), return 0
-	//else, return (Vobj.Vlight)^angular-a0
-	return 0;
 }
 
 void write_p3(Pixel *buffer, FILE *output_file, int width, int height, int max_color){
+	/*
+	input:	
+		Pixel *buffer: the buffer of pixels
+		FILE *output_file: the PPM file to write the image
+		int width: the width of the image
+		int height: the height of the image
+		int max_color: the maximum color values allowed
+	output: 
+		void
+	function:
+		write_p3() generates a PPM image file in P3 format
+	*/
   fprintf(output_file, "P3\n%d %d\n%d\n", width, height, max_color);
   int current_width = 1;
   for(int i = 0; i < width*height; i++){
@@ -898,63 +1220,15 @@ void write_p3(Pixel *buffer, FILE *output_file, int width, int height, int max_c
   }
 }
 
-double dot_product(double *v1, double *v2){
-	//dot_product currently ONLY FOR 3D VECTORS
-	return (v1[0]*v2[0]+v1[1]*v2[1]+v1[2]*v2[2]);
-}
-
-double vector_length(double *vector){
-	//vector_length currently ONLY FOR 3D VECTORS
-	return sqrt(sqr(vector[0])+sqr(vector[1])+sqr(vector[2]));
-}
-
-void get_reflection(double *N, double *L, double *result){
-	//(2N.L)*N-L
-	double dot_result;
-	double temp_vector[3]; 
-	dot_result = 2*dot_product(N, L);
-	scalar_multiply_vector(N, dot_result, temp_vector);
-	subtract_vectors(L, temp_vector, result);
-
-}
-
-void subtract_vectors(double *v1, double *v2, double *result){
-	result[0] = v2[0] - v1[0];
-	result[1] = v2[1] - v1[1];
-	result[2] = v2[2] - v1[2];
-}
-
-void scalar_multiply_vector(double *vector, double scalar, double *result){
-	result[0] = vector[0]*scalar;
-	result[1] = vector[1]*scalar;
-	result[2] = vector[2]*scalar;
-}
-
-double calculate_diffuse(double object_diff_color, double light_color, double *N, double *L){
-	double dot_result; 
-	dot_result = dot_product(N, L);
-	if(dot_result > 0){
-		return object_diff_color*light_color*dot_result;
-	}
-	else{
-		return 0;
-	}
-}
-
-double calculate_specular(double *L, double *N, double *R, double *V, double object_spec_color, double light_color){  //ADD PROTOTYPE
-	double V_dot_R;
-	double N_dot_L;
-	V_dot_R = dot_product(V, R);
-	N_dot_L = dot_product(N, L);
-	if(V_dot_R > 0 && N_dot_L > 0){
-		return object_spec_color * light_color * pow(V_dot_R, 20);
-	}
-	else{
-		return 0;
-	}
-}
-
 double clamp(double value){
+	/*
+	inputs: 
+		double value: value to be clamped (usually color values)
+	output: 
+		double: value betwee 0 and 1 (inclusive)
+	function: 
+		clamp() returns the value given, restricted to the range of 0 and 1
+	*/
 	if (value < 0){
 		return 0;
 	}

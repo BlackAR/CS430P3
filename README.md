@@ -1,5 +1,7 @@
-# CS430P2
-Second Project for Computer Graphics Course
+# CS430P3
+Third Project for Computer Graphics Course
+
+Continuation of CS430P2, with the inclusion of illumation and shading
 
 NOTE: In order to use the math library, Linux requires -lm be appended to the compile command, if you are unable to compile it, try removing it from the command in the makefile as follows: 
 
